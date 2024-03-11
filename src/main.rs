@@ -1,4 +1,5 @@
 use std::io::Write;
+use std::net::{IpAddr, SocketAddr};
 use std::str::FromStr;
 use clap::{Parser, Subcommand};
 use tokio::io::{BufWriter, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader, AsyncReadExt};
@@ -8,11 +9,13 @@ use tracing_subscriber::EnvFilter;
 use tracing_subscriber::filter::Directive;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
+use crate::discover::Discovery;
 use crate::input::AudioInput;
 use crate::output::AudioOutput;
 
 mod input;
 mod output;
+mod discover;
 
 const CLEAR_LINE: &str = "\x1B[K";
 const FLUSH_LINE: &str = "\r";
@@ -31,13 +34,24 @@ struct Args {
 
 #[derive(Subcommand, Debug)]
 enum Command {
+	Discovery {
+		#[arg(short = 'b', long, default_value = "0.0.0.0")]
+		/// The bind address to use for discovery.
+		bind_address: IpAddr,
+		#[arg(short = 'p', long)]
+		/// The port to search for audio receivers on.
+		port: u16,
+		#[arg(short = 't', long, default_value = None)]
+		/// A timeout in milliseconds to wait for discovery responses. Optional, defaults to no timeout.
+		timeout: Option<u32>,
+	},
 	Send {
 		#[arg(short = 'd', long)]
 		/// The audio device to use.
 		device: String,
 		#[arg(short = 'c', long)]
 		/// The address to connect to.
-		connect_address: String,
+		connect_address: SocketAddr,
 		#[arg(short = 'r', long, default_value_t = 44100)]
 		/// The sample rate to use. Must be supported by the audio devices of both the sender and receiver.
 		sample_rate: u32,
@@ -47,12 +61,18 @@ enum Command {
 		buffer_size: u32,
 	},
 	Recv {
+		#[arg(long)]
+		/// Whether to enable network discovery
+		enable_discovery: bool,
+		#[arg(long)]
+		/// The name of this audio receiver, used to identify it in discovery messages.
+		discovery_name: Option<String>,
 		#[arg(short = 'd', long)]
 		/// The audio device to use.
 		device: String,
 		#[arg(short = 'l', long)]
 		/// The address to listen on.
-		listen_address: String,
+		listen_address: SocketAddr,
 	},
 }
 
@@ -148,6 +168,9 @@ async fn main() -> eyre::Result<()> {
 
 	let args = Args::parse();
 	match args.command {
+		Command::Discovery { bind_address, port, timeout } => {
+			Discovery::discover(bind_address, port, timeout).await?;
+		}
 		Command::Send { device, connect_address, sample_rate, buffer_size } => {
 			let mut input = AudioInput::new(
 				device,
@@ -156,7 +179,7 @@ async fn main() -> eyre::Result<()> {
 			).await?;
 
 			loop {
-				let Ok(connection) = TcpStream::connect(connect_address.clone()).await else {
+				let Ok(connection) = TcpStream::connect(connect_address).await else {
 					tracing::warn!("Failed to connect to {}, retrying in 5s.", connect_address);
 					tokio::time::sleep(std::time::Duration::from_secs(5)).await;
 					continue;
@@ -223,7 +246,17 @@ async fn main() -> eyre::Result<()> {
 				}
 			}
 		}
-		Command::Recv { device, listen_address } => {
+		Command::Recv { device, listen_address, enable_discovery, discovery_name } => {
+			// Spawn a task to reply to discovery messages.
+			if enable_discovery {
+				let Some(discovery_name) = discovery_name.clone() else {
+					tracing::error!("Discovery name must be provided when discovery is enabled.");
+					return Err(eyre::eyre!("Discovery name must be provided when discovery is enabled."));
+				};
+				tokio::task::spawn(Discovery::start(listen_address, discovery_name));
+			}
+
+			// Spawn a TCP listener for incoming connections.
 			let listener = TcpListener::bind(&listen_address).await?;
 			tracing::info!("Listening for connections on {}", listen_address);
 
@@ -313,4 +346,5 @@ async fn main() -> eyre::Result<()> {
 			}
 		}
 	}
+	Ok(())
 }

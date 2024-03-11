@@ -54,7 +54,7 @@ impl AudioOutput {
 		tracing::info!("  Chosen buffer size: {}", buffer_size);
 
 		let (spawn_tx, mut spawn_rx) = tokio::sync::mpsc::channel::<eyre::Result<()>>(1);
-		let (mut tx, mut rx) = AsyncHeapRb::new(sr as usize * 2).split();
+		let (tx, mut rx) = AsyncHeapRb::new(sr as usize * 2).split();
 		std::thread::spawn(move || {
 			let result = || -> eyre::Result<()>  {
 				let stream = device.build_output_stream_raw(
