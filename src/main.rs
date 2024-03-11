@@ -111,7 +111,7 @@ async fn main() -> eyre::Result<()> {
 		.with(tracing_subscriber::fmt::layer())
 		.with(
 			EnvFilter::builder()
-				.with_default_directive(Directive::from_str("audio_transfer=debug").unwrap())
+				.with_default_directive(Directive::from_str("audio_stream=debug").unwrap())
 				.from_env()
 				.unwrap(),
 		)
