@@ -146,7 +146,7 @@ async fn main() -> eyre::Result<()> {
 
 				let start_time = Instant::now();
 				let mut num_written = 0;
-				let mut last_bytes_sec = 0.0;
+				let mut last_bits_sec = 0.0;
 				let mut buffer = vec![0.0; input.buffer_size() as usize];
 				loop {
 					// Read audio.
@@ -165,21 +165,21 @@ async fn main() -> eyre::Result<()> {
 						break;
 					};
 
-					// Calculate bytes per second.
+					// Calculate bits per second.
 					num_written += n;
-					let bytes_sec = num_written as f64 / start_time.elapsed().as_secs_f64();
-					if last_bytes_sec == 0.0 {
-						last_bytes_sec = bytes_sec;
+					let bits_sec = (num_written as f64 / start_time.elapsed().as_secs_f64()) * 8.0;
+					if last_bits_sec == 0.0 {
+						last_bits_sec = bits_sec;
 					}
-					let bytes_sec = 0.1 * bytes_sec + (1.0 - 0.1) * last_bytes_sec;
-					last_bytes_sec = bytes_sec;
+					let bits_sec = 0.1 * bits_sec + (1.0 - 0.1) * last_bits_sec;
+					last_bits_sec = bits_sec;
 
 					// Put some stats on screen.
 					print!(
-						"{CLEAR_LINE}[SEND] {} Hz, {} samples/buffer, {:.0} KB/s{FLUSH_LINE}",
+						"{CLEAR_LINE}[SEND] {} Hz, {} samples/buffer, {:.0} kbps{FLUSH_LINE}",
 						sample_rate,
 						buffer_size,
-						bytes_sec / 1024.0
+						bits_sec / 1024.0
 					);
 					std::io::stdout().flush().unwrap();
 				}
@@ -211,7 +211,7 @@ async fn main() -> eyre::Result<()> {
 				let mut buffer = vec![0.0; output.buffer_size() as usize];
 				let mut num_read = 0;
 				let mut last_latency = 0.0;
-				let mut last_bytes_sec = 0.0;
+				let mut last_bits_sec = 0.0;
 				let start_time = Instant::now();
 				loop {
 					// Read the message.
@@ -240,21 +240,21 @@ async fn main() -> eyre::Result<()> {
 					let latency = 0.1 * latency + (1.0 - 0.1) * last_latency;
 					last_latency = latency;
 
-					// Calculate bytes per second.
+					// Calculate bits per second.
 					num_read += n;
-					let bytes_sec = num_read as f64 / start_time.elapsed().as_secs_f64();
-					if last_bytes_sec == 0.0 {
-						last_bytes_sec = bytes_sec;
+					let bits_sec = (num_read as f64 / start_time.elapsed().as_secs_f64()) * 8.0;
+					if last_bits_sec == 0.0 {
+						last_bits_sec = bits_sec;
 					}
-					let bytes_sec = 0.1 * bytes_sec + (1.0 - 0.1) * last_bytes_sec;
-					last_bytes_sec = bytes_sec;
+					let bits_sec = 0.1 * bits_sec + (1.0 - 0.1) * last_bits_sec;
+					last_bits_sec = bits_sec;
 
 					// Put some stats on the screen.
 					print!(
-						"{CLEAR_LINE}[RECV] {} Hz, {} samples/buffer, {:.0} KB/s, {:.0}ms network latency{FLUSH_LINE}",
+						"{CLEAR_LINE}[RECV] {} Hz, {} samples/buffer, {:.0} kbps, {:.0}ms network latency{FLUSH_LINE}",
 						handshake.sample_rate,
 						handshake.buffer_size,
-						bytes_sec / 1024.0,
+						bits_sec / 1024.0,
 						latency
 					);
 					std::io::stdout().flush().unwrap();
