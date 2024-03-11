@@ -14,7 +14,6 @@ type RingBufProducer = AsyncProd<Arc<AsyncRb<Heap<f32>>>>;
 pub struct AudioOutput {
 	tx: RingBufProducer,
 	buffer_size: u32,
-	sample_rate: u32,
 }
 
 impl AudioOutput {
@@ -96,11 +95,7 @@ impl AudioOutput {
 		Ok(Self {
 			tx,
 			buffer_size,
-			sample_rate: sr,
 		})
-	}
-	pub fn sample_rate(&self) -> u32 {
-		self.sample_rate
 	}
 	pub fn buffer_size(&self) -> u32 {
 		self.buffer_size

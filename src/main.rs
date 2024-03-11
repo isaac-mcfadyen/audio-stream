@@ -1,6 +1,6 @@
 use std::io::Write;
 use std::str::FromStr;
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use tokio::io::{BufWriter, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader, AsyncReadExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::time::Instant;
@@ -20,6 +20,16 @@ const BLUE: &str = "\x1B[34m";
 const CLEAR_COLOR: &str = "\x1B[0m";
 
 #[derive(Parser, Debug)]
+struct Args {
+	#[clap(subcommand)]
+	command: Command,
+
+	#[clap(short = 'q', long)]
+	/// Quiet mode. Suppresses stats output.
+	quiet: bool,
+}
+
+#[derive(Subcommand, Debug)]
 enum Command {
 	Send {
 		#[arg(short = 'd', long)]
@@ -136,8 +146,8 @@ async fn main() -> eyre::Result<()> {
 		)
 		.init();
 
-	let args = Command::parse();
-	match args {
+	let args = Args::parse();
+	match args.command {
 		Command::Send { device, connect_address, sample_rate, buffer_size } => {
 			let mut input = AudioInput::new(
 				device,
@@ -196,18 +206,20 @@ async fn main() -> eyre::Result<()> {
 					last_bits_sec = bits_sec;
 
 					// Put some stats on screen.
-					print!(
-						"{CLEAR_LINE}[{BLUE}CONNECTED{CLEAR_COLOR}] SEND to {} | {} Hz, {} samples/buffer, {}{FLUSH_LINE}",
-						connect_address,
-						sample_rate,
-						buffer_size,
-						if fully_silent {
-							"1 kbps, silence detected".to_string()
-						} else {
-							format!("{:.0} kbps", bits_sec / 1024.0)
-						}
-					);
-					std::io::stdout().flush().unwrap();
+					if !args.quiet {
+						print!(
+							"{CLEAR_LINE}[{BLUE}CONNECTED{CLEAR_COLOR}] SEND to {} | {} Hz, {} samples/buffer, {}{FLUSH_LINE}",
+							connect_address,
+							sample_rate,
+							buffer_size,
+							if fully_silent {
+								"1 kbps, silence detected".to_string()
+							} else {
+								format!("{:.0} kbps", bits_sec / 1024.0)
+							}
+						);
+						std::io::stdout().flush().unwrap();
+					}
 				}
 			}
 		}
@@ -282,19 +294,21 @@ async fn main() -> eyre::Result<()> {
 					last_bits_sec = bits_sec;
 
 					// Put some stats on the screen.
-					print!(
-						"{CLEAR_LINE}[{BLUE}CONNECTED{CLEAR_COLOR}] RECV from {}, {:.0}ms network latency | {} Hz, {} samples/buffer, {}{FLUSH_LINE}",
-						addr,
-						latency,
-						handshake.sample_rate,
-						handshake.buffer_size,
-						if message.fully_silent {
-							"1 kbps, silence detected".to_string()
-						} else {
-							format!("{:.0} kbps", bits_sec / 1024.0)
-						}
-					);
-					std::io::stdout().flush().unwrap();
+					if !args.quiet {
+						print!(
+							"{CLEAR_LINE}[{BLUE}CONNECTED{CLEAR_COLOR}] RECV from {}, {:.0}ms network latency | {} Hz, {} samples/buffer, {}{FLUSH_LINE}",
+							addr,
+							latency,
+							handshake.sample_rate,
+							handshake.buffer_size,
+							if message.fully_silent {
+								"1 kbps, silence detected".to_string()
+							} else {
+								format!("{:.0} kbps", bits_sec / 1024.0)
+							}
+						);
+						std::io::stdout().flush().unwrap();
+					}
 				}
 			}
 		}
