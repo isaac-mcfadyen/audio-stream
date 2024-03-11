@@ -1,0 +1,14 @@
+[package]
+name = "audio-stream"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+eyre = "0.6.12"
+tracing = "0.1.40"
+tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
+tokio = { version = "1.36.0", features = ["full"] }
+clap = { version = "4.5.2", features = ["derive"] }
+cpal = "0.15.3"
+ringbuf = "0.4.0-rc.4"
+async-ringbuf = "0.2.0-rc.5"
