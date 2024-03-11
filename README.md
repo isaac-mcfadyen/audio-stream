@@ -6,6 +6,7 @@ A simple daemon used to play audio on another computer's output over the network
 - 🚀 Simple, Rust-based daemon.
 - 💻 Compatible with Linux (PulseAudio/ALSA) and macOS (CoreAudio). Windows untested.
 - 🛜 Low latency (real world testing shows 500-800ms end-to-end).
+- 🔕 Optimizations to reduce bandwidth when no audio is playing. 
 - 🔉 Allows any sample rate & buffer size supported by both audio devices.
 - 💻 Integrates live terminal-based stats on audio bandwidth and network latency.
 

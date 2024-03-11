@@ -75,6 +75,7 @@ impl Handshake {
 struct AudioMessage<'a> {
 	data: &'a [f32],
 	timestamp: u64,
+	fully_silent: bool,
 }
 
 impl<'a> AudioMessage<'a> {
@@ -86,6 +87,8 @@ impl<'a> AudioMessage<'a> {
 		where T: AsyncWrite + Unpin
 	{
 		buffer.write_u64(self.timestamp).await?;
+		buffer.write_u8(if self.fully_silent { 1 } else { 0 }).await?;
+		buffer.write_u64(self.data.len() as u64).await?;
 		for sample in self.data {
 			buffer.write_f32_le(*sample).await?;
 		}
@@ -99,11 +102,25 @@ impl<'a> AudioMessage<'a> {
 		let mut num_read = 0;
 		let timestamp = reader.read_u64().await?;
 		num_read += 8;
-		for sample in buffer.iter_mut() {
+
+		let fully_silent = reader.read_u8().await? == 1;
+		num_read += 1;
+
+		let length = reader.read_u64().await? as usize;
+		num_read += 8;
+
+		if length > buffer.len() {
+			return Err(eyre::eyre!("Buffer too small to read message."));
+		}
+		for sample in buffer.iter_mut().take(length) {
 			*sample = reader.read_f32_le().await?;
 			num_read += 4;
 		}
-		Ok((num_read, Self { data: buffer, timestamp }))
+		Ok((num_read, Self {
+			data: buffer,
+			fully_silent,
+			timestamp,
+		}))
 	}
 }
 
@@ -155,8 +172,10 @@ async fn main() -> eyre::Result<()> {
 					input.pop_slice(&mut buffer).await?;
 
 					// Encode and send the message.
+					let fully_silent = buffer.iter().all(|&v| v == 0.0);
 					let message = AudioMessage {
-						data: &buffer,
+						data: if fully_silent { &[] } else { &buffer },
+						fully_silent,
 						timestamp: std::time::SystemTime::now()
 							.duration_since(std::time::UNIX_EPOCH)
 							.unwrap()
@@ -207,15 +226,16 @@ async fn main() -> eyre::Result<()> {
 					handshake.buffer_size,
 				).await?;
 
-				// Push a buffer of silence to start. This step helps ensure there's a buffer,
-				// because if there's no buffer then there's a higher risk of audio artifacts.
-				output.push_slice(&vec![0.0; output.buffer_size() as usize]).await?;
-
+				let empty_buffer = vec![0.0; output.buffer_size() as usize];
 				let mut buffer = vec![0.0; output.buffer_size() as usize];
 				let mut num_read = 0;
 				let mut last_latency = 0.0;
 				let mut last_bits_sec = 0.0;
 				let start_time = Instant::now();
+
+				// Push a buffer of silence to start. This step helps ensure there's a buffer,
+				// because if there's no buffer then there's a higher risk of audio artifacts.
+				output.push_slice(&empty_buffer).await?;
 				loop {
 					// Read the message.
 					let (n, message) = match AudioMessage::read(&mut buffer, &mut reader).await {
@@ -229,8 +249,13 @@ async fn main() -> eyre::Result<()> {
 						}
 					};
 
-					// Write the audio to the output device.
-					output.push_slice(message.data).await?;
+					if message.fully_silent {
+						// Write an empty audio buffer to avoid audio artifacts.
+						output.push_slice(&empty_buffer).await?;
+					} else {
+						// Write the audio to the output device.
+						output.push_slice(message.data).await?;
+					}
 
 					// Calculate latency, smoothed using EMA.
 					let latency = (std::time::SystemTime::now()
