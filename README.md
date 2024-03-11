@@ -16,6 +16,7 @@ I was using Airplay to play audio from my MacBook to a Raspberry Pi connected to
 However, as detailed in [this article](https://darko.audio/2023/10/apple-airplay-isnt-always-lossless-sometimes-its-lossy/),
 Airplay has issues in either Airplay 1 or Airplay 2 mode - one mode causes a large audio delay,
 and the other encodes audio to 256 kbps AAC.
+I wanted a solution that was low-latency, lossless, and optimized for LAN streaming.
 
 ### Installation
 First, [install Rust](https://www.rust-lang.org/tools/install) if you haven't already.
@@ -41,8 +42,8 @@ On the sending side, run `audio-stream send`, passing in the device, address of 
 # Example: recording and sending audio from Blackhole on macOS
 # -d = audio device name
 # -c = receiver address (including port)
-# -b = buffer size (in frames)
-# -r = sample rate (in Hz)
+# -b = buffer size (in frames) - optional, default 2048
+# -r = sample rate (in Hz) - optional, default 44100
 audio-stream send -d "Blackhole 2ch" -c 192.168.0.10:8000 -r 44100 -b 1024
 ```
 
