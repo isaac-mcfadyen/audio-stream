@@ -197,11 +197,15 @@ async fn main() -> eyre::Result<()> {
 
 					// Put some stats on screen.
 					print!(
-						"{CLEAR_LINE}[{BLUE}CONNECTED{CLEAR_COLOR}] SEND to {} | {} Hz, {} samples/buffer, {:.0} kbps{FLUSH_LINE}",
+						"{CLEAR_LINE}[{BLUE}CONNECTED{CLEAR_COLOR}] SEND to {} | {} Hz, {} samples/buffer, {}{FLUSH_LINE}",
 						connect_address,
 						sample_rate,
 						buffer_size,
-						bits_sec / 1024.0
+						if fully_silent {
+							"1 kbps, silence detected".to_string()
+						} else {
+							format!("{:.0} kbps", bits_sec / 1024.0)
+						}
 					);
 					std::io::stdout().flush().unwrap();
 				}
@@ -279,12 +283,16 @@ async fn main() -> eyre::Result<()> {
 
 					// Put some stats on the screen.
 					print!(
-						"{CLEAR_LINE}[{BLUE}CONNECTED{CLEAR_COLOR}] RECV from {}, {:.0}ms network latency | {} Hz, {} samples/buffer, {:.0} kbps{FLUSH_LINE}",
+						"{CLEAR_LINE}[{BLUE}CONNECTED{CLEAR_COLOR}] RECV from {}, {:.0}ms network latency | {} Hz, {} samples/buffer, {}{FLUSH_LINE}",
 						addr,
 						latency,
 						handshake.sample_rate,
 						handshake.buffer_size,
-						bits_sec / 1024.0,
+						if message.fully_silent {
+							"1 kbps, silence detected".to_string()
+						} else {
+							format!("{:.0} kbps", bits_sec / 1024.0)
+						}
 					);
 					std::io::stdout().flush().unwrap();
 				}
