@@ -16,6 +16,8 @@ mod output;
 
 const CLEAR_LINE: &str = "\x1B[K";
 const FLUSH_LINE: &str = "\r";
+const BLUE: &str = "\x1B[34m";
+const CLEAR_COLOR: &str = "\x1B[0m";
 
 #[derive(Parser, Debug)]
 enum Command {
@@ -176,7 +178,8 @@ async fn main() -> eyre::Result<()> {
 
 					// Put some stats on screen.
 					print!(
-						"{CLEAR_LINE}[SEND] {} Hz, {} samples/buffer, {:.0} kbps{FLUSH_LINE}",
+						"{CLEAR_LINE}[{BLUE}CONNECTED{CLEAR_COLOR}] SEND to {} | {} Hz, {} samples/buffer, {:.0} kbps{FLUSH_LINE}",
+						connect_address,
 						sample_rate,
 						buffer_size,
 						bits_sec / 1024.0
@@ -251,11 +254,12 @@ async fn main() -> eyre::Result<()> {
 
 					// Put some stats on the screen.
 					print!(
-						"{CLEAR_LINE}[RECV] {} Hz, {} samples/buffer, {:.0} kbps, {:.0}ms network latency{FLUSH_LINE}",
+						"{CLEAR_LINE}[{BLUE}CONNECTED{CLEAR_COLOR}] RECV from {}, {:.0}ms network latency | {} Hz, {} samples/buffer, {:.0} kbps{FLUSH_LINE}",
+						addr,
+						latency,
 						handshake.sample_rate,
 						handshake.buffer_size,
 						bits_sec / 1024.0,
-						latency
 					);
 					std::io::stdout().flush().unwrap();
 				}
