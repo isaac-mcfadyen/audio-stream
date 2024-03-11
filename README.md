@@ -3,11 +3,11 @@
 A simple daemon used to play audio on another computer's output over the network.
 
 ### Features
-- Simple, Rust-based daemon
-- Compatible with Linux (PulseAudio/ALSA) and macOS (CoreAudio). Windows untested.
-- Low latency (real world testing shows 500-800ms end-to-end)
-- Allows any sample rate & buffer size supported by both audio devices
-- Integrates live terminal-based stats on audio bandwidth and network latency
+- 🚀 Simple, Rust-based daemon.
+- 💻 Compatible with Linux (PulseAudio/ALSA) and macOS (CoreAudio). Windows untested.
+- 🛜 Low latency (real world testing shows 500-800ms end-to-end).
+- 🔉 Allows any sample rate & buffer size supported by both audio devices.
+- 💻 Integrates live terminal-based stats on audio bandwidth and network latency.
 
 ### Motivation
 
