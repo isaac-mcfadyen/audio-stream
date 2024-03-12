@@ -60,7 +60,7 @@ impl AudioOutput {
 				let stream = device.build_output_stream_raw(
 					&config,
 					sample_format,
-					move |data: &mut cpal::Data, info: &cpal::OutputCallbackInfo| {
+					move |data: &mut cpal::Data, _| {
 						match data.sample_format() {
 							SampleFormat::F32 => {
 								let data = data.as_slice_mut::<f32>().unwrap();

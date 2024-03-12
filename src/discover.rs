@@ -1,5 +1,11 @@
-use std::net::{IpAddr, SocketAddr};
+use std::net::SocketAddr;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+use moka::future::Cache;
+use serde_json::json;
 use tokio::net::UdpSocket;
+use tokio::sync::mpsc;
+use tokio::sync::mpsc::Receiver;
 
 #[derive(Debug, Clone)]
 pub struct DiscoveryResult {
@@ -53,47 +59,127 @@ impl Discovery {
 			listener.send_to(&message.to_buffer()?, other_addr).await?;
 		}
 	}
-	pub async fn discover(addr: IpAddr, port: u16, timeout: Option<u32>) -> eyre::Result<()> {
-		let socket = UdpSocket::bind(
-			format!("{}:0", addr)
-		).await?;
-
-		// Send the discovery message.
+	async fn send_discovery(socket: Arc<UdpSocket>, port: u16) -> eyre::Result<()> {
 		socket.set_broadcast(true)?;
 		socket.send_to(
 			"audio-stream discovery".as_bytes(),
-			format!(
-				"{}:{}",
-				if addr.is_ipv4() {
-					"255.255.255.255"
-				} else {
-					"[ff02::1]"
-				},
-				port
-			),
+			format!("255.255.255.255:{}", port),
 		).await?;
+		Ok(())
+	}
+	async fn recv_discovery(socket: Arc<UdpSocket>) -> eyre::Result<Receiver<eyre::Result<DiscoveryResult>>> {
+		let mut buf = [0; 1024];
+		let (tx, rx) = mpsc::channel(1);
+		tokio::task::spawn(async move {
+			let result: eyre::Result<()> = async {
+				loop {
+					let (len, other_addr) = socket.recv_from(&mut buf).await?;
+					let message = DiscoveryMessage::from_buffer(&buf[..len])?;
+					tx.send(Ok(DiscoveryResult {
+						name: message.name,
+						addr: other_addr,
+					})).await.ok();
+				}
+			}.await;
+			if let Err(err) = result {
+				tx.send(Err(err)).await.ok();
+			}
+		});
+		Ok(rx)
+	}
 
-		// Wait for 1s for replies.
-		tracing::info!("Discovered audio receivers:");
-		let recv_task = async {
-			let mut buf = [0; 1024];
+	pub async fn search(name: String, port: u16, timeout: u32) -> eyre::Result<Option<DiscoveryResult>> {
+		let socket = Arc::new(UdpSocket::bind("0.0.0.0:0").await?);
+		let mut rx = Self::recv_discovery(socket.clone()).await?;
+		Self::send_discovery(socket.clone(), port).await?;
+
+		let found_task = async {
 			loop {
-				let (len, other_addr) = socket.recv_from(&mut buf).await?;
-				let message = DiscoveryMessage::from_buffer(&buf[..len])?;
-				tracing::info!("  \"{}\" at {}", message.name, other_addr);
+				let Some(device) = rx.recv().await else {
+					return Err(eyre::eyre!("Device discovery failed."));
+				};
+				let device = device?;
+				if device.name == name {
+					return Ok(device);
+				}
+			}
+		};
+		let timeout = tokio::time::sleep(Duration::from_millis(timeout as u64));
+		tokio::select! {
+			device = found_task => {
+				let device = device?;
+				Ok(Some(device))
+			}
+			_ = timeout => {
+				Ok(None)
+			}
+		}
+	}
+	pub async fn print_all(port: u16, timeout: u32, json: bool, ) -> eyre::Result<()> {
+		let socket = Arc::new(UdpSocket::bind("0.0.0.0:0").await?);
+		let mut devices = Self::recv_discovery(socket.clone()).await?;
+
+		// Prepare a future to send discovery messages.
+		let send_task = async {
+			let mut interval = tokio::time::interval(Duration::from_millis(100));
+			loop {
+				interval.tick().await;
+				Self::send_discovery(socket.clone(), port).await?;
 			}
 			Ok::<(), eyre::Error>(())
 		};
-		let timeout = tokio::time::sleep(std::time::Duration::from_millis(
-			// Max delay is 2.2 years, should be long enough.
-			timeout.map(|v| v as u64).unwrap_or(68719476734)
-		));
 
+		let found_items = Cache::builder()
+			.time_to_idle(Duration::from_millis(timeout as u64))
+			.eviction_listener(move |k: Arc<String>, v: DiscoveryResult, _| {
+				if json {
+					let json = json!({
+						"event": "lost",
+						"name": *k,
+						"addr": v.addr,
+					});
+					println!("{}", json);
+				} else {
+					tracing::info!("  \"{}\" at {} lost", k, v.addr);
+				}
+			})
+			.build();
+
+		// Prepare a future to add new clients.
+		let recv_task = async {
+			if !json {
+				tracing::info!("Discovered audio receivers:");
+			}
+			loop {
+				let Some(device) = devices.recv().await else {
+					return Err(eyre::eyre!("Device discovery failed."));
+				};
+				let device = device?;
+
+				// Ignore if this device is already known.
+				if found_items.get(&device.name).await.is_some() {
+					continue;
+				}
+				found_items.insert(device.name.clone(), device.clone()).await;
+
+				if json {
+					let json = json!({
+						"event": "discovered",
+						"name": device.name,
+						"addr": device.addr,
+					});
+					println!("{}", json);
+				} else {
+					tracing::info!("  \"{}\" at {} discovered", device.name, device.addr);
+				}
+			}
+			Ok::<(), eyre::Error>(())
+		};
 		tokio::select! {
-			_ = recv_task => {
+			_ = send_task => {
 				Ok(())
 			}
-			_ = timeout => {
+			_ = recv_task => {
 				Ok(())
 			}
 		}
