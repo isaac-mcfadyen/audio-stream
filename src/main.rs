@@ -1,6 +1,7 @@
 use std::io::Write;
+use std::net::SocketAddr;
 use std::str::FromStr;
-use clap::{Parser, Subcommand};
+use clap::{Args, Parser, Subcommand};
 use tokio::io::{BufWriter, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader, AsyncReadExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::time::Instant;
@@ -8,11 +9,13 @@ use tracing_subscriber::EnvFilter;
 use tracing_subscriber::filter::Directive;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
+use crate::discover::Discovery;
 use crate::input::AudioInput;
 use crate::output::AudioOutput;
 
 mod input;
 mod output;
+mod discover;
 
 const CLEAR_LINE: &str = "\x1B[K";
 const FLUSH_LINE: &str = "\r";
@@ -20,24 +23,38 @@ const BLUE: &str = "\x1B[34m";
 const CLEAR_COLOR: &str = "\x1B[0m";
 
 #[derive(Parser, Debug)]
-struct Args {
+struct ProgramArgs {
 	#[clap(subcommand)]
 	command: Command,
 
-	#[clap(short = 'q', long)]
-	/// Quiet mode. Suppresses stats output.
+	#[clap(global = true, short = 'q', long)]
+	/// Quiet mode. Suppresses output of stats.
 	quiet: bool,
 }
 
 #[derive(Subcommand, Debug)]
 enum Command {
+	Discover {
+		#[arg(short = 'p', long)]
+		/// The port to search for audio receivers on.
+		port: u16,
+		#[arg(short = 't', long, default_value_t = 1000)]
+		/// The time in milliseconds after which devices are considered lost.
+		timeout: u32,
+		#[arg(long, default_value_t = false)]
+		/// Output in machine-readable JSON.
+		json: bool,
+	},
 	Send {
+		#[arg(short = 'p', long)]
+		/// The port to use for discovery or connection.
+		port: u16,
+		#[command(flatten)]
+		connect: ConnectArgs,
+
 		#[arg(short = 'd', long)]
 		/// The audio device to use.
 		device: String,
-		#[arg(short = 'c', long)]
-		/// The address to connect to.
-		connect_address: String,
 		#[arg(short = 'r', long, default_value_t = 44100)]
 		/// The sample rate to use. Must be supported by the audio devices of both the sender and receiver.
 		sample_rate: u32,
@@ -47,13 +64,31 @@ enum Command {
 		buffer_size: u32,
 	},
 	Recv {
+		#[arg(long)]
+		/// Whether to enable network discovery
+		enable_discovery: bool,
+		#[arg(long, required_if_eq("enable_discovery", "true"))]
+		/// The name of this audio receiver, used to identify it in discovery messages.
+		discovery_name: Option<String>,
+
 		#[arg(short = 'd', long)]
 		/// The audio device to use.
 		device: String,
 		#[arg(short = 'l', long)]
 		/// The address to listen on.
-		listen_address: String,
+		listen_address: SocketAddr,
 	},
+}
+
+#[derive(Debug, Args)]
+#[group(required = true, multiple = false)]
+struct ConnectArgs {
+	#[arg(short = 'a', long)]
+	/// The address to connect to.
+	addr: Option<SocketAddr>,
+	#[arg(short = 'n', long)]
+	/// The name of a receiver to connect to.
+	name: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -146,9 +181,12 @@ async fn main() -> eyre::Result<()> {
 		)
 		.init();
 
-	let args = Args::parse();
+	let args = ProgramArgs::parse();
 	match args.command {
-		Command::Send { device, connect_address, sample_rate, buffer_size } => {
+		Command::Discover { port, timeout, json } => {
+			Discovery::print_all(port, timeout, json).await?;
+		}
+		Command::Send { device, port, connect, sample_rate, buffer_size } => {
 			let mut input = AudioInput::new(
 				device,
 				sample_rate,
@@ -156,10 +194,23 @@ async fn main() -> eyre::Result<()> {
 			).await?;
 
 			loop {
-				let Ok(connection) = TcpStream::connect(connect_address.clone()).await else {
-					tracing::warn!("Failed to connect to {}, retrying in 5s.", connect_address);
-					tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-					continue;
+				let connection = if let Some(addr) = connect.addr {
+					let Ok(connection) = TcpStream::connect(addr).await else {
+						tracing::warn!("Failed to connect to {}, retrying in 5s.", addr);
+						tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+						continue;
+					};
+					connection
+				} else if let Some(name) = connect.name.clone() {
+					let Some(device) = Discovery::search(name.clone(), port, 2000).await? else {
+						tracing::warn!("Failed to find device with name {}, retrying in 5s.", name);
+						tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+						continue;
+					};
+					tracing::info!("Found device with name \"{}\" at {}", name, device.addr);
+					TcpStream::connect(device.addr).await?
+				} else {
+					unreachable!();
 				};
 				let mut writer = BufWriter::new(connection);
 
@@ -208,8 +259,7 @@ async fn main() -> eyre::Result<()> {
 					// Put some stats on screen.
 					if !args.quiet {
 						print!(
-							"{CLEAR_LINE}[{BLUE}CONNECTED{CLEAR_COLOR}] SEND to {} | {} Hz, {} samples/buffer, {}{FLUSH_LINE}",
-							connect_address,
+							"{CLEAR_LINE}[{BLUE}CONNECTED{CLEAR_COLOR}] Sender | {} Hz, {} samples/buffer, {}{FLUSH_LINE}",
 							sample_rate,
 							buffer_size,
 							if fully_silent {
@@ -223,7 +273,17 @@ async fn main() -> eyre::Result<()> {
 				}
 			}
 		}
-		Command::Recv { device, listen_address } => {
+		Command::Recv { device, listen_address, enable_discovery, discovery_name } => {
+			// Spawn a task to reply to discovery messages.
+			if enable_discovery {
+				let Some(discovery_name) = discovery_name.clone() else {
+					tracing::error!("Discovery name must be provided when discovery is enabled.");
+					return Err(eyre::eyre!("Discovery name must be provided when discovery is enabled."));
+				};
+				tokio::task::spawn(Discovery::start(listen_address, discovery_name));
+			}
+
+			// Spawn a TCP listener for incoming connections.
 			let listener = TcpListener::bind(&listen_address).await?;
 			tracing::info!("Listening for connections on {}", listen_address);
 
@@ -296,7 +356,7 @@ async fn main() -> eyre::Result<()> {
 					// Put some stats on the screen.
 					if !args.quiet {
 						print!(
-							"{CLEAR_LINE}[{BLUE}CONNECTED{CLEAR_COLOR}] RECV from {}, {:.0}ms network latency | {} Hz, {} samples/buffer, {}{FLUSH_LINE}",
+							"{CLEAR_LINE}[{BLUE}CONNECTED{CLEAR_COLOR}] Receiving from {}, {:.0}ms network latency | {} Hz, {} samples/buffer, {}{FLUSH_LINE}",
 							addr,
 							latency,
 							handshake.sample_rate,
@@ -313,4 +373,5 @@ async fn main() -> eyre::Result<()> {
 			}
 		}
 	}
+	Ok(())
 }

@@ -15,7 +15,6 @@ type RingBufConsumer = AsyncCons<Arc<AsyncRb<Heap<f32>>>>;
 pub struct AudioInput {
 	rx: RingBufConsumer,
 	buffer_size: u32,
-	sample_rate: u32,
 }
 
 impl AudioInput {
@@ -61,7 +60,7 @@ impl AudioInput {
 				let stream = device.build_input_stream_raw(
 					&config,
 					sample_format,
-					move |data: &cpal::Data, info: &cpal::InputCallbackInfo| {
+					move |data: &cpal::Data, _| {
 						match data.sample_format() {
 							SampleFormat::F32 => {
 								let data = data.as_slice::<f32>().unwrap();
@@ -102,11 +101,7 @@ impl AudioInput {
 		Ok(Self {
 			rx,
 			buffer_size,
-			sample_rate: sr,
 		})
-	}
-	pub fn sample_rate(&self) -> u32 {
-		self.sample_rate
 	}
 	pub fn buffer_size(&self) -> u32 {
 		self.buffer_size
