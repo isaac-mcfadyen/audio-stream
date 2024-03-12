@@ -1,3 +1,18 @@
 /target
-.idea/
+.idea
 sync.sh
+.DS_Store
+node_modules
+
+# Vite-specific ignores.
+tauri/build
+tauri/.svelte-kit
+tauri/package
+.env
+vite.config.js.timestamp-*
+vite.config.ts.timestamp-*
+
+# Tauri-specific ignores.
+tauri/src-tauri/target
+tauri/src-tauri/gen
+
