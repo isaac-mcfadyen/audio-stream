@@ -41,10 +41,10 @@ On the sending side, run `audio-stream send`, passing in the device, address of 
 ```sh
 # Example: recording and sending audio from Blackhole on macOS
 # -d = audio device name
-# -c = receiver address (including port)
+# -a = receiver address (including port)
 # -b = buffer size (in frames) - optional, default 2048
 # -r = sample rate (in Hz) - optional, default 44100
-audio-stream send -d "Blackhole 2ch" -c 192.168.0.10:8000 -r 44100 -b 1024
+audio-stream send -d "Blackhole 2ch" -a 192.168.0.10:8000 -r 44100 -b 1024
 ```
 
 ### License
